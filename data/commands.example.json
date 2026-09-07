@@ -1,0 +1,6 @@
+{
+  "wave hello": { "type": "text",  "value": "hey there!" },
+  "flat spin":  { "type": "app",   "value": "Safari" },
+  "double tap": { "type": "key",   "value": "space" },
+  "twist":      { "type": "shell", "value": "say done" }
+}

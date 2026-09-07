@@ -2,3 +2,6 @@
 opencv-python>=4.9
 mediapipe==0.10.14
 numpy>=1.26
+
+# Pointer mode only (hands-free mouse). Everything else runs without it.
+pyautogui>=0.9

@@ -5,5 +5,12 @@ models/
 captures/snap_*.png
 .DS_Store
 
+# personal sign bank + practice / binding state (yours, not shared)
+signs/
+data/leitner.json
+data/commands.json
+data/practice_log.csv
+screenshots/
+
 # unrelated content synced into this folder by iCloud/Desktop sync
 Real Time Sign Language Translator 2/

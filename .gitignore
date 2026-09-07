@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+models/
+captures/snap_*.png
+.DS_Store
+
+# unrelated content synced into this folder by iCloud/Desktop sync
+Real Time Sign Language Translator 2/

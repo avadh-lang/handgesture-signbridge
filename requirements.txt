@@ -1,0 +1,4 @@
+# Python 3.12 (mediapipe has no working macOS wheel for 3.13/3.14 yet)
+opencv-python>=4.9
+mediapipe==0.10.14
+numpy>=1.26

@@ -102,21 +102,27 @@ Examples use the macOS/Linux venv path (`.venv/bin/python`); on Windows use
 | Control | `l` · `e` · `u` | learn + bind a command · reload `commands.json` · unbind last |
 | Pointer | — | drop your hand out of frame to release the cursor |
 
-## Web backend (in progress)
+## Web UI
 
-SignBridge is being reworked into a local inference server + web UI (see
-`docs/ARCHITECTURE.md` and `docs/REWORK_ROADMAP.md`). The backend half is
-up — the camera/MediaPipe/recognition loop is now also reachable over a
-local WebSocket, independent of the `app.py` cv2 window above (which still
-works exactly as before and isn't going away):
+SignBridge also runs as a local inference server + web UI (see
+`docs/ARCHITECTURE.md` and `docs/REWORK_ROADMAP.md`) alongside the cv2
+window above, which still works exactly as before and isn't going away.
 
 ```bash
-.venv/bin/python -m backend.server          # ws://127.0.0.1:8765/ws
+cd frontend && npm install && npm run build && cd ..
+.venv/bin/python -m backend.server          # http://127.0.0.1:8765
 ```
 
-There's no web frontend yet (that's Phase 3 of the roadmap) — this serves
-the WebSocket API only for now. `backend/runtime.py`'s `Engine` class is
-what both `app.py` and this server are meant to eventually share.
+Open `http://127.0.0.1:8765` in a browser — the backend serves the built
+frontend and the live WebSocket (`ws://127.0.0.1:8765/ws`) from the same
+process. All four modes, the same keyboard shortcuts as the table above,
+and a live camera feed with an animated landmark overlay. The backend
+streams the camera frame itself (not `getUserMedia`), so Python stays the
+sole camera owner.
+
+For frontend development (hot reload): `cd frontend && npm run dev`, with
+`.venv/bin/python -m backend.server` running alongside it — the dev server
+proxies `/ws` to the backend.
 
 ## How fingerspelling works
 

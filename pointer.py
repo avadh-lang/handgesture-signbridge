@@ -10,7 +10,10 @@ for someone who signs.  With this you can also move the pointer, click, drag and
 scroll - navigate *and* communicate without a keyboard, mouse or voice.
 
 The OS calls go through a ``sink`` so the state machine is testable with a fake.
-macOS needs Accessibility permission for the terminal.
+Cross-platform via ``pyautogui``: macOS needs Accessibility permission for the
+terminal; Windows needs nothing extra; Linux needs X11 - Wayland blocks
+synthetic mouse/keyboard input from other apps by design, so Pointer mode
+won't be able to move the real cursor there.
 """
 
 from __future__ import annotations

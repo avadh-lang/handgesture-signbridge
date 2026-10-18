@@ -39,20 +39,43 @@ Control.
 
 ## Setup
 
-MediaPipe has **no working macOS wheel for Python 3.13/3.14**, so this project
-uses **Python 3.12**.
+Cross-platform (macOS / Windows / Linux). **Python 3.12** is recommended
+everywhere — it's the newest version the pinned MediaPipe release has
+verified wheels for (confirmed broken on macOS arm64 for 3.13/3.14; use 3.12
+there, and fall back to it on Windows/Linux too if you hit the same).
 
+**macOS / Linux**
 ```bash
 cd "handgesture project"
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-First run needs **Camera** permission for your terminal. Typing into other apps
-(`t` in Communicator, Control macros) additionally needs **Accessibility**
-permission — both under System Settings → Privacy & Security.
+**Windows** (PowerShell)
+```powershell
+cd "handgesture project"
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+**Linux extra step** — voice output shells out to `espeak`/`espeak-ng`, which
+isn't installed by pip:
+```bash
+sudo apt install espeak-ng   # Debian/Ubuntu; use your distro's package manager
+```
+
+### Permissions
+
+| OS | Camera | Typing into other apps / Control macros |
+|---|---|---|
+| macOS | System Settings → Privacy & Security → Camera, allow your terminal | …→ Accessibility, allow your terminal |
+| Windows | Settings → Privacy & security → Camera, allow desktop apps | works out of the box |
+| Linux | your user needs to be in the `video` group | **X11 only** — Wayland blocks synthetic keystrokes/mouse input from other apps by design, so typing into other apps and Pointer mode won't work there |
 
 ## Run
+
+Examples use the macOS/Linux venv path (`.venv/bin/python`); on Windows use
+`.venv\Scripts\python` instead.
 
 ```bash
 .venv/bin/python app.py                    # Communicator, Holistic tracker

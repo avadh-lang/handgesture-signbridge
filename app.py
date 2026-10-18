@@ -11,7 +11,8 @@ Modes (switch any time with Tab):
     2  Coach         practise a sign, get a live score, spaced-repetition drills.
     3  Control       a custom sign fires an app / key / shell / text macro.
     4  Pointer       hands-free mouse: point to move, pinch to click / drag,
-                     two fingers to scroll  (needs pyautogui + Accessibility).
+                     two fingers to scroll  (needs pyautogui; macOS also needs
+                     Accessibility permission; Linux needs X11, not Wayland).
 
 Global keys:  Tab next mode   `  prev mode   s snapshot   h help   q/Esc quit
 Recording a sign:  Esc cancels.
@@ -22,6 +23,7 @@ Teach the app your own signs any time with:  python learn_sign.py "pizza"
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
@@ -58,10 +60,16 @@ def main() -> None:
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
     if not cap.isOpened():
-        raise SystemExit(
-            f"Could not open camera {args.camera}. On macOS grant Camera access "
-            "to your terminal in System Settings > Privacy & Security > Camera."
-        )
+        if sys.platform == "darwin":
+            hint = ("On macOS grant Camera access to your terminal in "
+                     "System Settings > Privacy & Security > Camera.")
+        elif sys.platform == "win32":
+            hint = ("On Windows check Settings > Privacy & security > Camera "
+                     "allows desktop apps, and that no other app is using the camera.")
+        else:
+            hint = ("On Linux check `ls /dev/video*` for the right --camera index, "
+                     "and that your user is in the `video` group.")
+        raise SystemExit(f"Could not open camera {args.camera}. {hint}")
 
     bank = SignBank(args.bank)
     live = LiveSigner()

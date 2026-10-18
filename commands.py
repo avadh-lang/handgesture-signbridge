@@ -7,10 +7,14 @@ action:
       "wave hello":  {"type": "text",  "value": "hey!"},
       "flat spin":   {"type": "app",   "value": "Safari"},
       "double tap":  {"type": "key",   "value": "space"},
-      "twist":       {"type": "shell", "value": "say done"}
+      "twist":       {"type": "shell", "value": "echo done"}
     }
 
 ``type:shell`` runs a local shell command - only ever your own, typed by you.
+It runs through your OS's default shell, so the command itself needs to be
+one that shell understands (e.g. ``say`` only exists on macOS, ``notify-send``
+only on Linux, etc.) - that's on you to pick per-platform, same as typing it
+yourself.
 """
 
 from __future__ import annotations
@@ -23,10 +27,15 @@ import output_sink
 
 COMMANDS_PATH = Path(__file__).parent / "data" / "commands.json"
 
-_KEYCODES = {
-    "space": 49, "return": 36, "enter": 36, "tab": 48, "esc": 53, "delete": 51,
-    "left": 123, "right": 124, "down": 125, "up": 126,
-    "f5": 96, "playpause": 49,
+# aliases -> the key name pyautogui expects (pyautogui maps these to the
+# right OS key code itself, so this table only needs to cover spelling
+# differences, not per-platform codes).
+_KEY_ALIASES = {
+    "delete": "backspace", "playpause": "space",
+}
+_VALID_KEYS = {
+    "space", "return", "enter", "tab", "esc", "backspace",
+    "left", "right", "down", "up", "f5",
 }
 
 
@@ -64,9 +73,10 @@ def run_action(action: dict) -> str:
     elif kind == "text":
         output_sink.type_text(value + " ")
     elif kind == "key":
-        code = _KEYCODES.get(value.lower())
-        if code is not None:
-            output_sink.press_key(code)
+        name = value.lower()
+        name = _KEY_ALIASES.get(name, name)
+        if name in _VALID_KEYS:
+            output_sink.press_key(name)
     elif kind == "shell":
         try:
             subprocess.Popen(value, shell=True)

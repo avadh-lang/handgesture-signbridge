@@ -1,7 +1,19 @@
-# Python 3.12 (mediapipe has no working macOS wheel for 3.13/3.14 yet)
+# Python 3.12 recommended on every OS - it's the newest version this exact
+# mediapipe pin has verified wheels for. Confirmed broken on macOS (arm64)
+# for Python 3.13/3.14 (ships Tasks API only, no mediapipe.solutions); if you
+# hit the same on Windows/Linux, fall back to 3.12 there too.
 opencv-python>=4.9
 mediapipe==0.10.14
 numpy>=1.26
 
 # Pointer mode only (hands-free mouse). Everything else runs without it.
+# On Linux this also needs python3-xlib (pulled in automatically by pip) and
+# only works under X11 - Wayland blocks synthetic input from other apps.
 pyautogui>=0.9
+
+# Communicator mode's "speak the sentence" (Enter key). Cross-platform text
+# to speech. On Linux it shells out to espeak/espeak-ng - install one of
+# those with your package manager (e.g. `sudo apt install espeak-ng`) if
+# speech stays silent; macOS and Windows use their built-in voices, no extra
+# install needed.
+pyttsx3>=2.90

@@ -156,7 +156,7 @@ class Communicator(Mode):
         if code in (8, 127):
             s.backspace()
             if self.type_out:
-                output_sink.press_key(51)
+                output_sink.press_key("backspace")
             self._typed = len(s.word)
             return True
         if code in (ord('1'), ord('2'), ord('3')):

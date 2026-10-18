@@ -11,9 +11,8 @@ protocol this roadmap implements.
 
 ## Status (updated 2026-10-18, same day)
 
-**Phase 2 is built and verified** — see its section below for exactly what
-landed and one deliberate deviation from the original plan. Phases 3–5 are
-still just this written plan, not built.
+**Phases 2 and 3 are built and verified.** Phases 4–5 are still just this
+written plan, not built.
 
 - `modes.py`: every `Mode` now has `compute(ctx) -> dict` (pure state, no
   `hud`/cv2 calls) and `on_action(action, ctx, **kw)` + a per-mode `KEYMAP`
@@ -46,8 +45,53 @@ still just this written plan, not built.
 - New deps (`fastapi`, `uvicorn[standard]`, `websockets`) added to
   `requirements.txt` and installed into `.venv` — not needed for the plain
   cv2 CLI, only for `python -m backend.server`.
-- **Not yet validated**: risk #1 below (dual camera access from both the
-  browser and Python at once) — still open, matters once Phase 3 starts.
+
+**Phase 3 is built and verified.** The web frontend exists and works —
+`frontend/` (Vite + React + TypeScript + Tailwind v4), styled from a Linear
+marketing-site `DESIGN.md` (`frontend/DESIGN.md`, fetched from
+awesome-design-md) adapted for a product/tool UI rather than a marketing
+page, dark-only by deliberate choice (the app is used over a live camera
+feed in all lighting conditions).
+
+- **Deviation from the original plan, decided during this phase**: risk #1
+  below (whether the browser and Python can both read the webcam at once)
+  was never validated — instead it was made moot. The backend streams JPEG
+  frames itself (see `docs/ARCHITECTURE.md`'s updated wire protocol table)
+  rather than having the browser call `getUserMedia`. This was the right
+  call for a localhost app: it keeps Python as the sole camera owner (one
+  less thing that can conflict), needed no human-in-the-loop browser
+  permission testing to validate, and the measured cost is negligible on
+  `127.0.0.1`.
+- Built: `src/lib/ws.ts` (WebSocket client, auto-reconnect), `src/state/
+  store.ts` (Zustand), `src/components/VideoOverlay.tsx` (two-layer
+  canvas: one draws the streamed JPEG, a second redraws every
+  `requestAnimationFrame` interpolating between the last two landmark
+  samples for fluid motion rather than stepping at ~30fps), `src/lib/
+  keyboard.ts` (browser keydown → the same named actions as `modes.py`'s
+  `KEYMAP`, so the same keys do the same thing in both the CLI and the
+  browser), per-mode views (`CommunicatorView`/`CoachView`/`ControlView`/
+  `PointerView`), `PromptModal.tsx`, `RecordingBanner.tsx`.
+- One backend addition made during this phase: `Engine.handle_action` grew
+  a `mode.set` action (jump directly to a named mode) alongside the
+  existing relative `mode.next`/`mode.prev`, for the frontend's clickable
+  mode tabs. Also fixed a real protocol gap caught while building the
+  frontend: the `recording` message was previously only sent while a
+  capture was active, giving a client no signal to ever clear a stale
+  banner — it's now sent every tick with an `active` field.
+- Verified, not just written: `npm run build` is clean (no TypeScript
+  errors). `backend/server.py` serves `frontend/dist` and was driven live
+  with Playwright CLI end to end — camera frames streaming into the
+  browser confirmed visually (screenshot), the landmark overlay confirmed
+  actually drawing (non-transparent canvas pixel count checked via
+  `page.evaluate`, not just visual guesswork), all four mode tabs clicked
+  and their real backend state rendered correctly (Coach showed real
+  `data/leitner.json` box counts, Control showed real `data/commands.json`
+  entries), zero browser console errors. A phone-width (390px) check
+  caught a genuine horizontal-overflow bug (canvas elements' large
+  intrinsic size not shrinking inside the CSS grid, plus the header nav
+  not wrapping) — both fixed and re-verified (`document.documentElement.
+  scrollWidth` confirmed back to viewport width).
+- `selftest.py` still 88/88 — Phase 3 touched no Python recognition logic.
 
 ## Target architecture specifics (recap)
 
@@ -238,13 +282,13 @@ problem under a different name.
 
 ## Risks / sequencing dependencies
 
-1. **Dual camera access is unproven.** The "no video frames over the wire"
-   design assumes the browser (`getUserMedia`) and Python
-   (`cv2.VideoCapture`) can both read the same webcam concurrently — OS/
-   driver-dependent, not guaranteed (especially on macOS). Validate with a
-   throwaway script at the start of Phase 2, before frontend work depends
-   on it. Fallback (already in the plan): Python-side throttled JPEG
-   streaming for the visible video only; landmarks are sent either way.
+1. ~~**Dual camera access is unproven.**~~ **Resolved by going with the
+   fallback as the primary design, not by validating the original plan.**
+   During Phase 3 this was made moot rather than tested: the backend
+   streams JPEG frames itself (what this risk entry called "the
+   fallback"), so the browser never calls `getUserMedia` and there's no
+   concurrent-camera-access question left to answer. See
+   `docs/ARCHITECTURE.md`'s wire protocol table.
 2. **Phase 4 data collection is a logistics dependency**, independent of
    coding time — `tools/collect_fingerspell.py` has to actually be run by
    several real volunteers. Can start in parallel with Phase 2/3 so data is

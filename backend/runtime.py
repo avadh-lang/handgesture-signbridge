@@ -8,12 +8,22 @@ these as two call paths, rather than making ``app.py`` depend on this
 ``Engine``, was a deliberate choice to avoid touching the working CLI loop
 in the same change that introduces the server - see docs/REWORK_ROADMAP.md.
 
+The Engine also encodes and streams the camera frame itself (as JPEG, see
+``_JPEG_EVERY``) rather than leaving the browser to grab its own feed via
+``getUserMedia``. The original plan left that an open question ("can the
+browser and Python read the same camera at once?"); streaming the frame
+from the one process that's already reading the camera sidesteps the
+question entirely, keeps Python as the single camera owner (consistent
+with the rest of the architecture), and costs very little on localhost -
+see docs/ARCHITECTURE.md for the updated wire protocol.
+
 Run standalone for a quick camera-free sanity check:
     .venv/bin/python -m backend.runtime
 """
 
 from __future__ import annotations
 
+import base64
 import time
 from dataclasses import dataclass
 
@@ -28,6 +38,7 @@ from skeleton import Pose
 from tracking import make_tracker
 
 MODE_NAMES = ["communicator", "coach", "control", "pointer"]
+_JPEG_EVERY = 2  # stream video at roughly half the landmark rate (~15fps of ~30)
 
 
 @dataclass
@@ -92,6 +103,7 @@ class Engine:
 
         self.pending_prompt: tuple | None = None   # (mode, kind)
         self._ctx: Ctx | None = None
+        self._frame_count = 0
 
     def close(self) -> None:
         self._tracker_cm.__exit__(None, None, None)
@@ -134,13 +146,24 @@ class Engine:
             self.pending_prompt = (self.mode, kind)
             prompt_msg = {"kind": kind, "label": label, "initial": initial}
 
-        recording_msg = None
-        if self.recorder.active:
-            recording_msg = {"state": self.recorder.state, "hint": self.recorder.hint}
+        # always present, not just while active - otherwise a frontend has no
+        # signal to clear its "recording..." banner once a capture finishes.
+        recording_msg = {
+            "active": self.recorder.active,
+            "state": self.recorder.state,
+            "hint": self.recorder.hint if self.recorder.active else "",
+        }
+
+        landmarks = _pose_to_landmarks(pose)
+        self._frame_count += 1
+        if self._frame_count % _JPEG_EVERY == 0:
+            ok_enc, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72])
+            if ok_enc:
+                landmarks["jpeg"] = base64.b64encode(buf).decode("ascii")
 
         return {
             "ok": True,
-            "landmarks": _pose_to_landmarks(pose),
+            "landmarks": landmarks,
             "view_state": view_state,
             "prompt": prompt_msg,
             "recording": recording_msg,
@@ -155,6 +178,15 @@ class Engine:
         if action in ("mode.next", "mode.prev"):
             step = 1 if action == "mode.next" else -1
             self.idx = (self.idx + step) % len(self.modes)
+            self.mode = self.modes[self.idx]
+            self.mode.activate(ctx)
+            self.live.reset()
+            return True
+        if action == "mode.set":
+            name = kw.get("name")
+            if name not in MODE_NAMES:
+                return False
+            self.idx = MODE_NAMES.index(name)
             self.mode = self.modes[self.idx]
             self.mode.activate(ctx)
             self.live.reset()

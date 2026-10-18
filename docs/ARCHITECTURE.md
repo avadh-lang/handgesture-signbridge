@@ -5,6 +5,15 @@ production architecture for the planned rework (see `docs/REWORK_ROADMAP.md`
 for the phased implementation plan). Written to support the project's
 research paper.
 
+**Status (2026-10-18): built, not just planned.** Phase 2 (backend split)
+and a working Phase 3 (web frontend) both landed the same day this doc was
+written — the architecture below is no longer only a target, it's running.
+One real deviation from the original plan: the browser does **not** grab
+its own camera feed via `getUserMedia` (see the wire protocol table below)
+— the backend streams JPEG frames itself instead, which turned out simpler
+and removed an entire open risk. Details in `docs/REWORK_ROADMAP.md`'s
+Status section.
+
 ## Current architecture (as of 2026-10-18)
 
 A single Python process, one OpenCV window, synchronous loop:
@@ -62,7 +71,7 @@ Chosen pattern for the next phase, and the one documented for the paper:
 │        └───────────────┴────────────────────────────────┘                            │
 │                        ▼                                                              │
 │             React frontend (frontend/)                                                │
-│             ├─ getUserMedia (own camera grab, for the visible video only)             │
+│             ├─ renders the streamed JPEG frame (backend owns the camera)              │
 │             ├─ <canvas> landmark overlay, interpolated for fluid motion               │
 │             └─ per-mode views (Communicator/Coach/Control/Pointer)                    │
 │                        │                                                              │
@@ -95,11 +104,11 @@ Chosen pattern for the next phase, and the one documented for the paper:
 
 | Type | Direction | Rate | Purpose |
 |---|---|---|---|
-| `landmarks` | backend → frontend | ~30fps | Raw hand/body landmark coordinates only (no JPEG — the browser captures its own camera feed via `getUserMedia` for the visible video; Python's camera read only drives recognition) |
+| `landmarks` | backend → frontend | ~30fps | Hand/body landmark coordinates, plus a base64 JPEG video frame on every other message (~15fps) — **deviation from the original plan**: the browser doesn't grab its own camera via `getUserMedia`; Python, which is already reading the camera for recognition, streams the frame too. Removes an entire open risk (whether the OS lets both processes read the same camera at once) at the cost of a small amount of localhost bandwidth |
 | `view_state` | backend → frontend | ~10-15Hz | Per-mode application state (text, scores, bound commands, pointer status) — one payload shape per mode |
-| `event` | frontend → backend | on input | Named action strings (`"backspace"`, `"mode.next"`, `"communicator.accept_suggestion"`) replacing raw keycodes |
+| `event` | frontend → backend | on input | Named action strings (`"backspace"`, `"mode.next"`, `"mode.set"`, `"communicator.accept_suggestion"`) replacing raw keycodes |
 | `prompt` | backend → frontend | as needed | Async text-entry request (e.g. "command sign name"), replacing today's synchronous `ctx.request_prompt()` |
-| `recording` | backend → frontend | during capture | Countdown/progress while teaching a new sign (3-rep recorder state) |
+| `recording` | backend → frontend | every tick | Countdown/progress while teaching a new sign; always sent (with `active: false` when idle), not just while capturing — otherwise a client has no signal to clear a stale "recording…" banner |
 
 Full per-mode `view_state` payload shapes and the `on_key`→`on_action`
 migration plan are specified in `docs/REWORK_ROADMAP.md` (Phase 2/3).
@@ -116,9 +125,10 @@ migration plan are specified in `docs/REWORK_ROADMAP.md` (Phase 2/3).
 
 ### Known open questions (tracked in `docs/REWORK_ROADMAP.md`'s risk list)
 
-- Whether the OS allows the browser and Python to read the same physical
-  webcam concurrently (unproven, needs validation before frontend work
-  depends on it; has a documented fallback).
 - Whether landmark smoothing (One-Euro filter) should apply before
   recognition (risk: blurs fast legitimate transitions) or only to the
-  display overlay — an open design decision, not yet made.
+  display overlay — an open design decision, not yet made (this is
+  Phase 5, not yet built).
+- The dual-camera-access question this section originally listed here is
+  resolved as moot — see the Status note above and the `landmarks` row in
+  the wire protocol table.

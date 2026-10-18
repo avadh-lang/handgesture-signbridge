@@ -88,11 +88,12 @@ class ConnectionHub:
             messages = [
                 {"type": "landmarks", "t": time.time(), **result["landmarks"]},
                 {"type": "view_state", "mode": self.engine.mode_name, "payload": result["view_state"]},
+                # always sent (not just while active) so a client can clear a
+                # "recording..." banner once a capture finishes - see runtime.py
+                {"type": "recording", **result["recording"]},
             ]
             if result["prompt"] is not None:
                 messages.append({"type": "prompt", **result["prompt"]})
-            if result["recording"] is not None:
-                messages.append({"type": "recording", **result["recording"]})
             for msg in messages:
                 self._broadcast(msg)
 

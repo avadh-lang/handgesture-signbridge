@@ -268,6 +268,47 @@ def test_fingerspell():
           classify_letter(left_v, "Left").letter)
 
 
+def test_fingerspell_relaxed():
+    """Regression tests for a real user-reported bug: fingers held
+    *relaxed* (not ruler-straight, as every CANON-based hand above is) used
+    to land in the unclassified gap between `ext` and `curled`, where almost
+    no letter scores - so letters needing multiple extended fingers (B, U,
+    V, H, K, W) and the fist family (A, S, T, E, M, N, which all require
+    every finger strictly `curled`) silently failed to read. Fixed by
+    narrowing that gap in fingerspell.py's `_features`.
+    """
+    u_relaxed = fold(fold(CANON, ["ring", "pinky"]), ["index", "middle"], amount=0.18)
+    got = classify_letter(place(u_relaxed), "Right").letter
+    check("relaxed (not ruler-straight) U still reads as U", got == "U", got)
+
+    v_relaxed = splay(fold(fold(CANON, ["ring", "pinky"]), ["index", "middle"], amount=0.18), 0.13)
+    got = classify_letter(place(v_relaxed), "Right").letter
+    check("relaxed (not ruler-straight) V still reads as V", got == "V", got)
+
+    b_relaxed = fold(thumb_to(CANON, (0.0, 0.08)), ["index", "middle", "ring", "pinky"], amount=0.15)
+    got = classify_letter(place(b_relaxed), "Right").letter
+    check("relaxed (not ruler-straight) B still reads as B", got == "B", got)
+
+    a_relaxed = thumb_to(fold(CANON, ["index", "middle", "ring", "pinky"], amount=0.8), (-0.02, 0.10))
+    got = classify_letter(place(a_relaxed), "Right").letter
+    check("a less-than-fully-clenched fist still reads as the fist family",
+          got in {"A", "S", "T", "E", "M", "N"}, got)
+
+    # D is signed with the index pointing up; P/Q/G are the same single-
+    # extended-finger shape at a different orientation. D used to win
+    # regardless of orientation since it never checked `point` - now the
+    # same handshape, just rotated, should read as D / Q / G respectively.
+    pointer_hand = thumb_to(fold(CANON, ["middle", "ring", "pinky"]), (0.0, -0.02))
+    up = classify_letter(place(pointer_hand, angle=0.0), "Right").letter
+    down = classify_letter(place(pointer_hand, angle=np.pi), "Right").letter
+    side = classify_letter(place(pointer_hand, angle=np.pi / 2), "Right").letter
+    check("index-up reads as D", up == "D", up)
+    check("the same handshape pointing down does not get read as D (Q, not D)",
+          down != "D", down)
+    check("the same handshape pointing sideways does not get read as D (G, not D)",
+          side != "D", side)
+
+
 # ============================================================ 6. predict
 from predict import Predictor  # noqa: E402
 
@@ -562,7 +603,7 @@ def test_backend_runtime():
 # ==================================================================== run
 def run():
     for fn in (test_gestures, test_skeleton, test_dtw, test_signbank,
-               test_fingerspell, test_predict, test_speller, test_glosser,
+               test_fingerspell, test_fingerspell_relaxed, test_predict, test_speller, test_glosser,
                test_leitner, test_live, test_filters, test_pointer,
                test_sessionlog, test_modes, test_backend_runtime):
         print(f"\n{fn.__name__}:")

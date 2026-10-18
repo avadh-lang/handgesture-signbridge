@@ -67,10 +67,21 @@ def _features(hand, handedness: str = "Right") -> _Feat:
     tip_d = np.linalg.norm(tips, axis=1)
     pip_d = np.linalg.norm(pips, axis=1)
 
-    # a finger is judged by its tip relative to its own knuckle, not the wrist
+    # a finger is judged by its tip relative to its own knuckle, not the wrist.
+    # The ext/curled cutoffs used to sit at 0.55/0.2 with a strict 1.03x
+    # tip-vs-pip margin - fine for a hand held ruler-straight, but real
+    # fingers (especially on hands with different proportions than the
+    # original tuner's) often land in the 0.2-0.55 gap between them, where
+    # almost no letter scores at all since every rule below tests `ext`/
+    # `curled` as strict booleans. Narrowing the gap (and dropping the extra
+    # safety margin on the tip/pip ratio - `rise` alone already rules out a
+    # folded-but-coincidentally-high tip) means fewer real hands fall into
+    # that no-man's-land. See docs/REWORK_ROADMAP.md Phase 4 for the real
+    # fix (a trained classifier); this is a bounded improvement to the
+    # existing rules, not a replacement for it.
     rise = mcps[:, 1] - tips[:, 1]                       # how far the tip is above the MCP
-    ext = (rise > 0.55) & (tip_d > pip_d * 1.03)
-    curled = rise < 0.2
+    ext = (rise > 0.42) & (tip_d > pip_d)
+    curled = rise < 0.25
     half = ~ext & ~curled
     thumb = norm[THUMB_TIP]
     thumb_touch = np.linalg.norm(tips - thumb, axis=1)
@@ -127,7 +138,11 @@ def _scores(f: _Feat) -> dict[str, float]:
     s["I"] = _b(p and not i and not m and not r) * 0.95
     s["Y"] = _b(p and not i and not m and not r and thumb_out) * 1.0
     s["L"] = _b(i and not m and not r and not p and thumb_out) * 1.0
-    s["D"] = _b(i and not m and not r and not p and f.thumb_touch[1] < 0.7) * (
+    # D is signed with the index pointing up - excluding "down"/"side" stops
+    # it swallowing P/Q/G (same single-finger shape, different orientation),
+    # which otherwise always lost to D since D never checked orientation.
+    s["D"] = _b(i and not m and not r and not p and f.thumb_touch[1] < 0.7
+                and f.point in ("up", "camera")) * (
         0.7 + 0.3 * _b(not thumb_out))
     s["G"] = _b(i and not m and not r and not p and f.point in ("side", "camera")) * 0.6
     s["X"] = _b(f.half[0] and not i and f.curled[1] and f.curled[2] and f.curled[3]) * 0.8

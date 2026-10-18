@@ -309,6 +309,73 @@ def test_fingerspell_relaxed():
           side != "D", side)
 
 
+def test_fingerspell_ml():
+    """Phase 4 (docs/REWORK_ROADMAP.md): classify_letter_ml/classify_letter_best
+    against a throwaway model trained on synthetic data (not the real
+    data/models/fingerspell_rf.joblib - this never touches that file), plus
+    the zero-dependency fallback when no model exists at all. Skips cleanly
+    if scikit-learn/joblib aren't installed - they're optional."""
+    try:
+        import joblib
+        from sklearn.ensemble import RandomForestClassifier
+    except ImportError:
+        check("fingerspell_ml (scikit-learn not installed)", True,
+              "skipped - optional dependency")
+        return
+
+    import fingerspell
+    from skeleton import hand_feature
+
+    rng = np.random.default_rng(7)
+
+    def jittered(hand, n=12):
+        return [hand + rng.normal(scale=0.01, size=hand.shape) for _ in range(n)]
+
+    shapes = {
+        "B": thumb_to(CANON, (0.0, 0.08)),
+        "I": fold(CANON, ["index", "middle", "ring"]),
+        "W": fold(CANON, ["pinky"]),
+    }
+    X, y = [], []
+    for letter, base in shapes.items():
+        for h in jittered(base):
+            X.append(hand_feature(place(h), mirror=False))
+            y.append(letter)
+    clf = RandomForestClassifier(n_estimators=30, random_state=0).fit(np.array(X), y)
+
+    with tempfile.TemporaryDirectory() as d:
+        model_path = Path(d) / "model.joblib"
+        joblib.dump(clf, model_path)
+
+        real_path, real_model, real_failed = (
+            fingerspell._ML_MODEL_PATH, fingerspell._ml_model, fingerspell._ml_failed)
+        try:
+            fingerspell._ML_MODEL_PATH = model_path
+            fingerspell._ml_model, fingerspell._ml_failed = None, False
+
+            res = fingerspell.classify_letter_ml(place(shapes["B"]), "Right")
+            check("classify_letter_ml returns a Letter once a model exists",
+                  res is not None and res.letter == "B", str(res))
+
+            best = fingerspell.classify_letter_best(place(shapes["W"]), "Right")
+            check("classify_letter_best uses the ML model when one is loaded",
+                  best.letter == "W", best.letter)
+
+            # ---- fallback: no model file at all ----
+            fingerspell._ML_MODEL_PATH = Path(d) / "does-not-exist.joblib"
+            fingerspell._ml_model, fingerspell._ml_failed = None, False
+
+            check("classify_letter_ml returns None with no model file",
+                  fingerspell.classify_letter_ml(place(shapes["B"]), "Right") is None)
+            rule_based = fingerspell.classify_letter(place(shapes["B"]), "Right")
+            best_fallback = fingerspell.classify_letter_best(place(shapes["B"]), "Right")
+            check("classify_letter_best falls back to classify_letter with no model",
+                  best_fallback.letter == rule_based.letter, best_fallback.letter)
+        finally:
+            fingerspell._ML_MODEL_PATH = real_path
+            fingerspell._ml_model, fingerspell._ml_failed = real_model, real_failed
+
+
 # ============================================================ 6. predict
 from predict import Predictor  # noqa: E402
 
@@ -603,7 +670,8 @@ def test_backend_runtime():
 # ==================================================================== run
 def run():
     for fn in (test_gestures, test_skeleton, test_dtw, test_signbank,
-               test_fingerspell, test_fingerspell_relaxed, test_predict, test_speller, test_glosser,
+               test_fingerspell, test_fingerspell_relaxed, test_fingerspell_ml,
+               test_predict, test_speller, test_glosser,
                test_leitner, test_live, test_filters, test_pointer,
                test_sessionlog, test_modes, test_backend_runtime):
         print(f"\n{fn.__name__}:")

@@ -23,3 +23,8 @@ pyttsx3>=2.90
 fastapi>=0.115
 uvicorn[standard]>=0.32
 websockets>=13
+
+# tools/train_fingerspell.py (Phase 4). Optional - fingerspell.py falls back
+# to the rule-based classifier if no model has been trained.
+scikit-learn>=1.5
+joblib>=1.4

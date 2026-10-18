@@ -12,5 +12,12 @@ data/commands.json
 data/practice_log.csv
 screenshots/
 
+# Phase 4 (docs/REWORK_ROADMAP.md): real people's hand-landmark recordings,
+# tagged by person_id - never commit this, consent to be in the app's own
+# training data isn't consent to be on a public GitHub repo. data/models/
+# (the trained classifier) is already covered by the `models/` rule above.
+data/fingerspell_dataset/
+data/eval/
+
 # unrelated content synced into this folder by iCloud/Desktop sync
 Real Time Sign Language Translator 2/

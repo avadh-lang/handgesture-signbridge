@@ -14,7 +14,7 @@ from pathlib import Path
 
 import cv2
 
-from fingerspell import classify_letter
+from fingerspell import classify_letter_best
 from gestures import recognize
 from hand_tracker import HandTracker
 
@@ -43,7 +43,7 @@ def main() -> int:
             print("no hands detected")
         for i, hand in enumerate(hands, 1):
             state = recognize(hand.landmarks, hand.handedness)
-            letter = classify_letter(hand.landmarks, hand.handedness)
+            letter = classify_letter_best(hand.landmarks, hand.handedness)
             spelled = f"{letter.letter}{'*' if letter.motion else ''} ({letter.confidence:.2f})"
             print(f"hand {i}: {hand.handedness:5s}  {state.emoji} {state.gesture}"
                   f"  fingers={state.fingers} count={state.finger_count}"

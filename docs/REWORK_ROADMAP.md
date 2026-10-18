@@ -11,8 +11,68 @@ protocol this roadmap implements.
 
 ## Status (updated 2026-10-18, same day)
 
-**Phases 2 and 3 are built and verified.** Phases 4–5 are still just this
-written plan, not built.
+**Phases 2 and 3 are built and verified. Phase 4's tooling is built and
+verified too — the data isn't.** Phase 5 is still just this written plan.
+
+**Also fixed outside this roadmap's original scope**: a real bug in the
+rule-based `classify_letter` surfaced by hands-on testing (A/B/E/R/S/T/U/V
+and the D/G/P/Q "mirror" letters not reading). Root-caused and fixed in
+`fingerspell.py` — see the git log (`0f0d288`) and `test_fingerspell_relaxed`
+in `selftest.py`. Worth knowing before reading Phase 4's results below:
+some of what Phase 4 was scoped to fix is already partly fixed by that
+patch; Phase 4's job now is the *remaining* gap (hand-proportion
+generalization) that no amount of rule-tuning closes.
+
+**Phase 4 tooling — built, verified against the real tool chain, zero real
+data collected yet**:
+- `tools/collect_fingerspell.py` — guided capture through the 24 static
+  letters, saves raw landmarks (not pre-computed features, so later
+  analysis isn't locked into one feature representation) to
+  `data/fingerspell_dataset/<person_id>/<LETTER>.npz`. Gitignored — real
+  people's hand recordings never get committed.
+- `tools/train_fingerspell.py` — loads the dataset, computes
+  `skeleton.hand_feature()` per sample, trains a `RandomForestClassifier`,
+  **defaults to a person-held-out split** (never random-split within a
+  person — the whole point is testing on a hand the model never saw).
+  Prints a loud warning if only one person's data exists, because that
+  "held-out" number would just be held-out *letters* from the same hand,
+  not a generalization test. Saves to `data/models/fingerspell_rf.joblib`
+  (gitignored, covered by the existing `models/` rule) + a `.meta.json`.
+- `fingerspell.py` — `classify_letter_ml()` (returns `None` if no model
+  file exists) and `classify_letter_best()` (ML if available, else the
+  rule-based fallback — zero-dependency when no model has been trained).
+  All real call sites (`modes.py`'s Communicator/Coach, `demo_image.py`)
+  switched to `classify_letter_best` so neither knows which backend is
+  active.
+- `tools/eval_fingerspell.py` — runs **both** classifiers on the exact same
+  held-out samples (apples-to-apples, unlike training's internal split),
+  reports accuracy + top confusions for each, writes
+  `data/eval/fingerspell_comparison.json`.
+- **Verified for real**: ran the actual CLI scripts (not just library
+  calls) end to end against synthetic 2-"person" data written in
+  `collect_fingerspell.py`'s exact `.npz` format, then deleted all of it
+  afterward (see the git log for the throwaway smoke-test script, not
+  committed). `train_fingerspell.py --holdout` and `eval_fingerspell.py
+  --holdout` both ran correctly; `eval_fingerspell.py` even caught a real,
+  known issue (the rule-based classifier's `U`/`V` threshold) in its
+  confusion output on synthetic data — a good sign the harness actually
+  measures something real, not just plumbing. `selftest.py` 88 → **99/99**
+  (11 new checks: `test_fingerspell_relaxed` for the bug fix above, plus
+  `test_fingerspell_ml` for `classify_letter_ml`/`classify_letter_best`
+  against a throwaway synthetic model, and the zero-dependency fallback
+  path — skips cleanly if scikit-learn isn't installed). `app.py`'s cv2
+  CLI reconfirmed unaffected.
+- Added `scikit-learn`, `joblib` to `requirements.txt`, installed into
+  `.venv`.
+
+**What's NOT done — the actual point of this phase**: zero real people's
+data has been collected. The tooling works; the claim "fixes
+generalization across hand shapes" is still unproven, because that
+requires `tools/collect_fingerspell.py` to actually be run by several
+different real people, which only the user (recruiting volunteers) can do.
+Until then, `data/models/fingerspell_rf.joblib` doesn't exist, and
+`classify_letter_best` silently uses the rule-based classifier — nothing
+breaks, there's just no model to be better yet.
 
 - `modes.py`: every `Mode` now has `compute(ctx) -> dict` (pure state, no
   `hud`/cv2 calls) and `on_action(action, ctx, **kw)` + a per-mode `KEYMAP`

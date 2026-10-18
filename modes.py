@@ -38,7 +38,7 @@ import numpy as np
 import hud
 import output_sink
 from commands import load_commands, parse_action, run_action, save_commands
-from fingerspell import ALPHABET, classify_letter
+from fingerspell import ALPHABET, classify_letter_best
 from glosser import gloss
 from leitner import Leitner
 from live import LiveSigner
@@ -138,7 +138,7 @@ class Communicator(Mode):
         letter, conf = None, 0.0
         hand, label = dominant_hand(ctx.pose)
         if hand is not None and not ctx.paused:
-            res = classify_letter(hand, label)
+            res = classify_letter_best(hand, label)
             if not res.motion:
                 letter, conf = res.letter, res.confidence
         committed = self.speller.feed_letter(letter, conf, ctx.now)
@@ -309,7 +309,7 @@ class Coach(Mode):
             hand, label = dominant_hand(ctx.pose)
             if hand is None:
                 return 0.0
-            r = classify_letter(hand, label)
+            r = classify_letter_best(hand, label)
             if r.letter != name:
                 return 0.0
             return max(r.confidence, 0.3)

@@ -1,21 +1,35 @@
-"""Rule-based ASL fingerspelling alphabet from one hand's landmarks.
+"""ASL fingerspelling alphabet from one hand's landmarks - two classifiers,
+one entry point.
 
-Pure geometry, camera-free, so it's covered by the self-test.
+``classify_letter`` is the original rule-based geometry classifier: pure
+math, zero dependencies, works out of the box. Its hard look-alikes
+(A/S/T/M/N are all near-fists; U/V/H differ only by spread; D/G/P/Q differ
+only by orientation) are thresholds tuned to one hand's proportions - see
+docs/REWORK_ROADMAP.md Phase 4 for the full writeup.
 
-Reality check: the ASL alphabet has hard look-alikes (A/S/T/M/N are all
-near-fists; U/V/H differ only by spread and orientation).  This classifier
-nails the well-separated letters and returns a lower ``confidence`` for the
-ambiguous clusters.  **J** and **Z** are drawn in the air - they're reported
-with ``motion=True`` on their static base handshape (I and D) and resolved by
-the dynamic layer / sign bank.
+``classify_letter_ml`` is a trained classifier (tools/train_fingerspell.py)
+over data/models/fingerspell_rf.joblib, when one has been trained on data
+collected with tools/collect_fingerspell.py. Returns ``None`` if no model
+file exists.
 
-For rock-solid fingerspelling, record your own A-Z into the sign bank
-(``learn_sign.py``); the bank is checked before this classifier.
+``classify_letter_best`` is what the app actually calls: the trained model
+if there is one, else the rule-based fallback - no call site needs to know
+which is active.
+
+**J** and **Z** are drawn in the air - both classifiers report them with
+``motion=True`` on their static base handshape (I and D) and rely on the
+dynamic layer / sign bank to resolve the stroke.
+
+For guaranteed-correct results on any single letter right now, record it
+into the sign bank instead (``learn_sign.py``); the bank is checked before
+either classifier runs.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -23,10 +37,13 @@ from skeleton import (
     INDEX_MCP, INDEX_PIP, INDEX_TIP, MIDDLE_MCP, MIDDLE_PIP, MIDDLE_TIP,
     PINKY_MCP, PINKY_PIP, PINKY_TIP, RING_MCP, RING_PIP, RING_TIP,
     THUMB_IP, THUMB_MCP, THUMB_TIP, WRIST,
-    as_xy, hand_angle, normalize_hand, palm_scale,
+    as_xy, hand_angle, hand_feature, normalize_hand, palm_scale,
 )
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+_ML_MODEL_PATH = Path(__file__).parent / "data" / "models" / "fingerspell_rf.joblib"
+_ML_META_PATH = _ML_MODEL_PATH.with_suffix("").with_suffix(".meta.json")
 
 
 @dataclass
@@ -165,7 +182,15 @@ def _scores(f: _Feat) -> dict[str, float]:
 
 
 def classify_letter(hand, handedness: str = "Right") -> Letter:
-    """Best ASL letter for a single hand, with a confidence margin."""
+    """Best ASL letter for a single hand, with a confidence margin.
+
+    Rule-based: fast, zero dependencies, no data needed - but the hand-tuned
+    thresholds above are tuned to one hand's proportions and genuinely
+    struggle on the near-fist (A/S/T/M/N) and orientation (D/G/P/Q, U/V/H)
+    clusters on a different hand. ``classify_letter_best`` is almost always
+    what callers want instead - it uses a trained model when one exists
+    (see tools/train_fingerspell.py) and only falls back to this.
+    """
     landmarks = list(hand)
     if len(landmarks) != 21:
         raise ValueError(f"expected 21 landmarks, got {len(landmarks)}")
@@ -174,3 +199,65 @@ def classify_letter(hand, handedness: str = "Right") -> Letter:
     (best, bs), (_, ss) = ranked[0], ranked[1]
     conf = 0.0 if bs <= 0 else max(0.0, min(1.0, (bs - ss) / max(bs, 1e-6)))
     return Letter(best, round(conf, 3), motion=best in ("J", "Z"))
+
+
+# --------------------------------------------------------------- Phase 4 ML
+_ml_model = None    # lazy-loaded; None until first use, stays None if unavailable
+_ml_failed = False
+
+
+def _load_ml_model():
+    global _ml_model, _ml_failed
+    if _ml_model is not None or _ml_failed:
+        return _ml_model
+    if not _ML_MODEL_PATH.exists():
+        _ml_failed = True
+        return None
+    try:
+        import joblib
+        _ml_model = joblib.load(_ML_MODEL_PATH)
+    except Exception:
+        _ml_failed = True
+        return None
+    return _ml_model
+
+
+def classify_letter_ml(hand, handedness: str = "Right") -> Letter | None:
+    """Trained-classifier fingerspelling (see tools/train_fingerspell.py).
+    Returns ``None`` if no model has been trained yet - callers should fall
+    back to ``classify_letter``, or just call ``classify_letter_best``."""
+    model = _load_ml_model()
+    if model is None:
+        return None
+    hand_xy = np.asarray(hand, dtype=np.float64)[:, :2]
+    mirror = handedness.lower().startswith("l")
+    feat = hand_feature(hand_xy, mirror=mirror).reshape(1, -1)
+    proba = model.predict_proba(feat)[0]
+    classes = model.classes_
+    order = np.argsort(proba)[::-1]
+    best_letter = str(classes[order[0]])
+    best_p = float(proba[order[0]])
+    second_p = float(proba[order[1]]) if len(order) > 1 else 0.0
+    conf = 0.0 if best_p <= 0 else max(0.0, min(1.0, (best_p - second_p) / max(best_p, 1e-6)))
+    return Letter(best_letter, round(conf, 3), motion=best_letter in ("J", "Z"))
+
+
+def classify_letter_best(hand, handedness: str = "Right") -> Letter:
+    """What every caller in the app actually uses: the trained classifier
+    if one has been trained (see tools/train_fingerspell.py), else the
+    rule-based ``classify_letter`` - zero-dependency, works with no setup."""
+    return classify_letter_ml(hand, handedness) or classify_letter(hand, handedness)
+
+
+def ml_model_info() -> dict | None:
+    """Metadata about the currently-loaded trained model, or None if there
+    isn't one - e.g. to show whether a result came from a model trained on
+    a real generalization test or just one person's data."""
+    if _load_ml_model() is None:
+        return None
+    if not _ML_META_PATH.exists():
+        return {}
+    try:
+        return json.loads(_ML_META_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}

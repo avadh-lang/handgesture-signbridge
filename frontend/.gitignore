@@ -15,6 +15,10 @@ dist-ssr
 # Playwright CLI screenshots/snapshots from manual verification passes
 .playwright-cli/
 
+# the user's own personal practice reference image - licensed stock content,
+# local use only, must NEVER be committed or pushed to this public repo
+public/local-only/
+
 # the design-taste-frontend skill (fetched via `npx skills add`, not project code)
 .agents/
 .claude/

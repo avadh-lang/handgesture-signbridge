@@ -3,6 +3,7 @@ import { CommunicatorView } from "./components/modes/CommunicatorView";
 import { CoachView } from "./components/modes/CoachView";
 import { ControlView } from "./components/modes/ControlView";
 import { PointerView } from "./components/modes/PointerView";
+import { PersonalReferenceImage } from "./components/PersonalReferenceImage";
 import { PromptModal } from "./components/PromptModal";
 import { RecordingBanner } from "./components/RecordingBanner";
 import { TopBar } from "./components/TopBar";
@@ -50,6 +51,7 @@ function App() {
           <ModePanel />
         </div>
       </main>
+      <PersonalReferenceImage />
       <AlphabetReference />
       <PromptModal />
     </div>

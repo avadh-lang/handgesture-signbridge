@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useSignBridgeStore } from "../state/store";
 import type { ModeName } from "../types";
+import { AlphabetReference } from "./AlphabetReference";
 
 const MODES: { id: ModeName; label: string; hint: string }[] = [
   { id: "communicator", label: "Communicator", hint: "1" },
@@ -12,6 +14,7 @@ export function TopBar() {
   const mode = useSignBridgeStore((s) => s.mode);
   const status = useSignBridgeStore((s) => s.status);
   const send = useSignBridgeStore((s) => s.send);
+  const [showReference, setShowReference] = useState(false);
 
   return (
     <header className="flex flex-col gap-3 border-b border-hairline px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
@@ -39,7 +42,17 @@ export function TopBar() {
           );
         })}
       </nav>
-      <ConnectionDot status={status} className="hidden sm:flex" />
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setShowReference(true)}
+          className="shrink-0 rounded-md border border-hairline px-3 py-1.5 text-sm text-ink-muted hover:bg-surface-1 hover:text-ink"
+        >
+          A–Z reference
+        </button>
+        <ConnectionDot status={status} className="hidden sm:flex" />
+      </div>
+      {showReference && <AlphabetReference onClose={() => setShowReference(false)} />}
     </header>
   );
 }

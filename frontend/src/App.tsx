@@ -1,3 +1,4 @@
+import { AlphabetReference } from "./components/AlphabetReference";
 import { CommunicatorView } from "./components/modes/CommunicatorView";
 import { CoachView } from "./components/modes/CoachView";
 import { ControlView } from "./components/modes/ControlView";
@@ -38,9 +39,9 @@ function App() {
   useKeyboardActions();
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-5 px-5 py-4">
+    <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-5 px-5 py-4">
       <TopBar />
-      <main className="grid min-w-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[3fr_2fr]">
+      <main className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-[3fr_2fr]">
         <div className="relative min-w-0">
           <VideoOverlay />
           <RecordingBanner />
@@ -49,6 +50,7 @@ function App() {
           <ModePanel />
         </div>
       </main>
+      <AlphabetReference />
       <PromptModal />
     </div>
   );

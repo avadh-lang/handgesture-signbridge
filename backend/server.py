@@ -23,6 +23,15 @@ asyncio.Queue per connected browser tab.
 
 frontend/dist, once Phase 3 builds it, gets served as static files at "/".
 Until then this process is WebSocket-API-only.
+
+Perf note: defaults to --tracker hands (not holistic) - holistic runs a
+face mesh + full body pose every frame that fingerspelling never uses,
+and measured ~40-60% slower end to end (~10-14fps vs ~17-21fps on the
+machine this was tuned on). The streamed video frame is also downscaled
+(see backend/runtime.py's _JPEG_STREAM_WIDTH) - recognition still runs on
+the full-resolution frame, only the browser's preview copy shrinks.
+Engine.step() logs "[backend] loop ~Nfps" every 60 frames to stdout if
+you want to check your own machine's numbers.
 """
 
 from __future__ import annotations
@@ -190,7 +199,12 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--camera", type=int, default=0)
-    ap.add_argument("--tracker", choices=("holistic", "hands"), default="holistic")
+    ap.add_argument("--tracker", choices=("holistic", "hands"), default="hands",
+                     help="'hands' (default) is lighter and visibly smoother over the "
+                          "network - ~17-21fps measured vs ~10-14fps for 'holistic' on this "
+                          "machine, since holistic also runs face+body pose every frame that "
+                          "fingerspelling doesn't use. Pass --tracker holistic for body-relative "
+                          "whole-sign matching (Communicator/Coach's DTW path) at the cost of lag.")
     ap.add_argument("--mode", default="communicator")
     ap.add_argument("--swap-hands", action="store_true")
     args = ap.parse_args()

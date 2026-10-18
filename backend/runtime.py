@@ -38,7 +38,9 @@ from skeleton import Pose
 from tracking import make_tracker
 
 MODE_NAMES = ["communicator", "coach", "control", "pointer"]
-_JPEG_EVERY = 2  # stream video at roughly half the landmark rate (~15fps of ~30)
+_JPEG_STREAM_WIDTH = 480   # the streamed preview is downscaled - recognition still
+                           # runs on the full-res frame, only the browser's copy shrinks
+_JPEG_QUALITY = 60
 
 
 @dataclass
@@ -104,6 +106,8 @@ class Engine:
         self.pending_prompt: tuple | None = None   # (mode, kind)
         self._ctx: Ctx | None = None
         self._frame_count = 0
+        self._fps = 0.0
+        self._prev_step = time.time()
 
     def close(self) -> None:
         self._tracker_cm.__exit__(None, None, None)
@@ -156,10 +160,18 @@ class Engine:
 
         landmarks = _pose_to_landmarks(pose)
         self._frame_count += 1
-        if self._frame_count % _JPEG_EVERY == 0:
-            ok_enc, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72])
-            if ok_enc:
-                landmarks["jpeg"] = base64.b64encode(buf).decode("ascii")
+        h, w = frame.shape[:2]
+        stream_frame = cv2.resize(frame, (_JPEG_STREAM_WIDTH, int(h * _JPEG_STREAM_WIDTH / w)))
+        ok_enc, buf = cv2.imencode(".jpg", stream_frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY])
+        if ok_enc:
+            landmarks["jpeg"] = base64.b64encode(buf).decode("ascii")
+
+        now2 = time.time()
+        self._fps = 0.9 * self._fps + 0.1 / max(now2 - self._prev_step, 1e-6)
+        self._prev_step = now2
+        if self._frame_count % 60 == 0:
+            size_kb = len(buf) / 1024 if ok_enc else 0
+            print(f"[backend] loop ~{self._fps:4.1f}fps  jpeg ~{size_kb:.0f}KB")
 
         return {
             "ok": True,

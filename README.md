@@ -120,6 +120,12 @@ and a live camera feed with an animated landmark overlay. The backend
 streams the camera frame itself (not `getUserMedia`), so Python stays the
 sole camera owner.
 
+Defaults to the lighter `--tracker hands` (measured ~17-21fps vs ~10-14fps
+for `holistic` on the machine this was tuned on — holistic also runs a
+face mesh + body pose every frame that fingerspelling doesn't use). Pass
+`--tracker holistic` for body-relative whole-sign matching (the DTW path
+in Communicator/Coach) if your machine can keep up with it.
+
 For frontend development (hot reload): `cd frontend && npm run dev`, with
 `.venv/bin/python -m backend.server` running alongside it — the dev server
 proxies `/ws` to the backend.

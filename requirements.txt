@@ -17,3 +17,9 @@ pyautogui>=0.9
 # speech stays silent; macOS and Windows use their built-in voices, no extra
 # install needed.
 pyttsx3>=2.90
+
+# backend/ - the web-UI server (Phase 2 of docs/REWORK_ROADMAP.md). Optional
+# for the plain cv2 CLI (app.py) - only needed to run `python -m backend.server`.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+websockets>=13

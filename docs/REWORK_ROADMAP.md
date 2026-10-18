@@ -2,13 +2,52 @@
 
 Written 2026-10-18 as the detailed, ready-to-execute plan for the actual
 UI/backend/ML rebuild, following the Phase 1 documentation pass
-(`docs/ARCHITECTURE.md`, `docs/competitor_analysis.md`). **Nothing in this
-document has been built yet** — this is the plan a future session should
-pick up and execute, phase by phase, without needing to re-derive any of
-this research.
+(`docs/ARCHITECTURE.md`, `docs/competitor_analysis.md`). This is the plan a
+future session should pick up and execute, phase by phase, without needing
+to re-derive any of this research.
 
 See `docs/ARCHITECTURE.md` for the target architecture diagram and wire
 protocol this roadmap implements.
+
+## Status (updated 2026-10-18, same day)
+
+**Phase 2 is built and verified** — see its section below for exactly what
+landed and one deliberate deviation from the original plan. Phases 3–5 are
+still just this written plan, not built.
+
+- `modes.py`: every `Mode` now has `compute(ctx) -> dict` (pure state, no
+  `hud`/cv2 calls) and `on_action(action, ctx, **kw)` + a per-mode `KEYMAP`
+  (`on_key` is now a thin shim on the base `Mode` class translating codes
+  to actions via `KEYMAP`). `update()` calls `compute()` then draws via
+  `hud.*`, so `app.py`'s cv2 window is behaviorally unchanged.
+- New `backend/` package: `runtime.py` (`Engine` — owns the camera, calls
+  `Mode.compute()`, exposes `handle_action`/`handle_prompt_submit`/
+  `handle_prompt_cancel`) and `server.py` (FastAPI, one `/ws` WebSocket
+  route implementing the full wire protocol from `docs/ARCHITECTURE.md`:
+  `landmarks`/`view_state`/`prompt`/`recording` out, `event` in). Mounts
+  `frontend/dist` as static files once Phase 3 produces it; API-only until
+  then.
+- **Deviation from the original plan**: `app.py` was *not* rewired to
+  build its loop on top of `Engine`. `Engine` is a separate, fresh
+  implementation of the same loop shape, built on the new `Mode.compute()`.
+  This was a deliberate risk call — making `app.py` depend on `Engine` would
+  have meant also reintroducing a `render_cv2()` step to turn `ViewState`
+  back into `hud.*` calls, which is more surface area to get wrong in the
+  same change that introduces the server. Net effect: `app.py`'s loop body
+  and `Engine.step()` are structurally similar but not DRY — low risk now,
+  worth DRYing up in a later pass once the web frontend (Phase 3) is real
+  and both paths have proven stable.
+- Verified: `.venv/bin/python selftest.py` is 88/88 (77 original + 11 new
+  `test_modes`/`test_backend_runtime` checks exercising `compute()`, the
+  `on_key`→`KEYMAP`→`on_action` shim, and the `landmarks` JSON serializer).
+  `app.py` launches cleanly post-refactor. A raw WebSocket client against
+  `python -m backend.server` confirmed `landmarks`/`view_state` arrive and
+  a `mode.next` event actually switches the active mode.
+- New deps (`fastapi`, `uvicorn[standard]`, `websockets`) added to
+  `requirements.txt` and installed into `.venv` — not needed for the plain
+  cv2 CLI, only for `python -m backend.server`.
+- **Not yet validated**: risk #1 below (dual camera access from both the
+  browser and Python at once) — still open, matters once Phase 3 starts.
 
 ## Target architecture specifics (recap)
 

@@ -1,4 +1,4 @@
-"""The three modes SignBridge runs, over one shared tracking loop.
+"""The four modes SignBridge runs, over one shared tracking loop.
 
     1  Communicator  - sign / fingerspell -> text; speak it or type it into the
                        focused app.  `v` flips to the reverse channel: type a
@@ -7,9 +7,25 @@
                        score, spaced-repetition drills that persist.
     3  Control       - a custom sign fires an app / keystroke / shell / text
                        macro.
+    4  Pointer       - hands-free mouse: point to move, pinch to click/drag,
+                       two fingers to scroll.
 
-App calls ``mode.update(ctx)`` each frame and routes keys / prompts / finished
-recordings back to the active mode.
+Each mode separates *deciding* from *drawing*:
+
+    mode.compute(ctx) -> dict      pure-ish state update, no frame drawing.
+                                    This is what a non-OpenCV frontend (e.g.
+                                    the planned web UI) consumes directly.
+    mode.update(ctx)               calls compute() then draws the result via
+                                    hud.* onto ctx.frame - this is what the
+                                    OpenCV CLI (app.py) calls every frame.
+
+Keyboard input works the same way: every mode declares a ``KEYMAP`` from
+OpenCV keycodes to named actions, and implements ``on_action(action, ctx,
+**kw)``. ``on_key(code, ctx)`` (what app.py's cv2 loop calls) is a thin
+shim on the base ``Mode`` class that looks the code up in ``KEYMAP`` and
+calls ``on_action`` - so the keyboard path and any future named-action path
+(e.g. a web frontend's `{"action": "backspace"}` message) can never drift
+apart; there is exactly one action vocabulary, not two.
 """
 
 from __future__ import annotations
@@ -57,11 +73,23 @@ class Ctx:
 class Mode:
     title = "?"
     keyhint = ""
+    # OpenCV keycode -> action name, or (action name, kwargs dict).
+    KEYMAP: dict = {}
 
     def activate(self, ctx: Ctx) -> None: ...
     def update(self, ctx: Ctx) -> None: ...
-    def on_key(self, code: int, ctx: Ctx) -> bool:
+    def compute(self, ctx: Ctx) -> dict: return {}
+
+    def on_action(self, action: str, ctx: Ctx, **kw) -> bool:
         return False
+
+    def on_key(self, code: int, ctx: Ctx) -> bool:
+        spec = self.KEYMAP.get(code)
+        if spec is None:
+            return False
+        action, kw = spec if isinstance(spec, tuple) else (spec, {})
+        return self.on_action(action, ctx, **kw)
+
     def on_prompt(self, kind: str, value: str, ctx: Ctx) -> None: ...
     def on_recorded(self, result: dict, ctx: Ctx) -> None: ...
 
@@ -70,6 +98,18 @@ class Mode:
 class Communicator(Mode):
     title = "Communicator"
     keyhint = "space | bksp | 1/2/3 pick | enter speak | t type->app | v reverse | r teach word"
+
+    KEYMAP = {
+        ord('v'): "communicator.toggle_reverse",
+        ord(' '): "communicator.space",
+        8: "backspace", 127: "backspace",
+        ord('1'): ("communicator.accept_suggestion", {"index": 0}),
+        ord('2'): ("communicator.accept_suggestion", {"index": 1}),
+        ord('3'): ("communicator.accept_suggestion", {"index": 2}),
+        13: "communicator.speak", 10: "communicator.speak",
+        ord('t'): "communicator.toggle_type_out",
+        ord('r'): "communicator.teach_word",
+    }
 
     def __init__(self) -> None:
         self.speller = Speller()
@@ -82,11 +122,9 @@ class Communicator(Mode):
         self.flash = ""
 
     # ---- forward: sign -> text
-    def update(self, ctx: Ctx) -> None:
-        f = ctx.frame
+    def compute(self, ctx: Ctx) -> dict:
         if self.reverse:
-            self._draw_reverse(ctx)
-            return
+            return self._compute_reverse(ctx)
 
         if not ctx.paused:
             m = ctx.live.poll(ctx.bank, ctx.now)
@@ -107,16 +145,56 @@ class Communicator(Mode):
         if committed and self.type_out:
             self._sync_typing()
 
-        hud.top_bar(f, "1 Communicator", "TYPE->APP" if self.type_out else "")
+        hold_fraction = self.speller.hold_fraction(ctx.now) if letter else 0.0
+        return {
+            "mode": "communicator",
+            "reverse": False,
+            "type_out": self.type_out,
+            "word": self.speller.word,
+            "sentence_text": self.speller.text(),
+            "suggestions": list(self.speller.suggestions),
+            "detecting_letter": letter,
+            "detecting_conf": conf,
+            "hold_fraction": hold_fraction,
+            "flash": self.flash,
+            "bank_count": len(ctx.bank),
+        }
+
+    def _compute_reverse(self, ctx: Ctx) -> dict:
+        texts: list[str] = []
+        active = -1
+        if self.reverse_cards:
+            n = len(self.reverse_cards)
+            step = max(0.0, ctx.now - self.reverse_since)
+            active = min(int(step / 1.1), n - 1)
+            for c in self.reverse_cards:
+                texts.append("-".join(c.letters) if c.kind == "fingerspell" else c.text)
+        return {
+            "mode": "communicator",
+            "reverse": True,
+            "reverse_cards": texts,
+            "reverse_active": active,
+        }
+
+    def update(self, ctx: Ctx) -> None:
+        state = self.compute(ctx)
+        f = ctx.frame
+        if state["reverse"]:
+            hud.cards(f, state["reverse_cards"], state["reverse_active"])
+            hud.top_bar(f, "1 Communicator - reverse channel", "v = back")
+            return
+
+        hud.top_bar(f, "1 Communicator", "TYPE->APP" if state["type_out"] else "")
         lines = []
-        if letter:
-            frac = self.speller.hold_fraction(ctx.now)
-            lines.append((f"detecting  {letter}  {conf:.2f}  {'#' * int(frac * 10):<10}", hud.AMBER))
-        lines.append((f"word:  {self.speller.word or '_'}", hud.WHITE))
-        if self.flash:
-            lines.append((self.flash, hud.GREEN))
+        if state["detecting_letter"]:
+            frac = state["hold_fraction"]
+            lines.append((f"detecting  {state['detecting_letter']}  {state['detecting_conf']:.2f}  "
+                          f"{'#' * int(frac * 10):<10}", hud.AMBER))
+        lines.append((f"word:  {state['word'] or '_'}", hud.WHITE))
+        if state["flash"]:
+            lines.append((state["flash"], hud.GREEN))
         hud.panel(f, lines)
-        hud.caption_bar(f, self.speller.text(), self.speller.suggestions)
+        hud.caption_bar(f, state["sentence_text"], state["suggestions"])
 
     def _sync_typing(self) -> None:
         w = self.speller.word
@@ -124,61 +202,46 @@ class Communicator(Mode):
             output_sink.type_text(w[self._typed:])
         self._typed = len(w)
 
-    # ---- reverse: text -> gloss cards
-    def _draw_reverse(self, ctx: Ctx) -> None:
-        if self.reverse_cards:
-            n = len(self.reverse_cards)
-            step = max(0.0, ctx.now - self.reverse_since)
-            active = min(int(step / 1.1), n - 1)
-            texts = []
-            for c in self.reverse_cards:
-                texts.append("-".join(c.letters) if c.kind == "fingerspell" else c.text)
-            hud.cards(ctx.frame, texts, active)
-        else:
-            hud.cards(ctx.frame, [])
-        hud.top_bar(ctx.frame, "1 Communicator - reverse channel", "v = back")
-
-    def on_key(self, code: int, ctx: Ctx) -> bool:
+    def on_action(self, action: str, ctx: Ctx, index: int | None = None, **kw) -> bool:
         s = self.speller
-        if code == ord('v'):
+        if action == "communicator.toggle_reverse":
             self.reverse = not self.reverse
             if self.reverse:
                 ctx.request_prompt("say", "say")
             return True
         if self.reverse:
             return True
-        if code == ord(' '):
+        if action == "communicator.space":
             s.space()
             if self.type_out:
                 output_sink.type_text(" ")
             self._typed = 0
             return True
-        if code in (8, 127):
+        if action == "backspace":
             s.backspace()
             if self.type_out:
                 output_sink.press_key("backspace")
             self._typed = len(s.word)
             return True
-        if code in (ord('1'), ord('2'), ord('3')):
-            i = code - ord('1')
-            if i < len(s.suggestions):
-                sugg = s.suggestions[i]
+        if action == "communicator.accept_suggestion":
+            if index is not None and index < len(s.suggestions):
+                sugg = s.suggestions[index]
                 if self.type_out:
                     output_sink.type_text(sugg[self._typed:] + " ")
-                s.accept(i)
+                s.accept(index)
                 self._typed = 0
             return True
-        if code in (13, 10):
+        if action == "communicator.speak":
             text = s.pop_sentence()
             output_sink.speak(text)
             self.flash = f'spoke: "{text}"'
             self._typed = 0
             return True
-        if code == ord('t'):
+        if action == "communicator.toggle_type_out":
             self.type_out = not self.type_out
             self._typed = len(s.word)
             return True
-        if code == ord('r'):
+        if action == "communicator.teach_word":
             ctx.request_prompt("teach_word", "teach word (sign its name later)")
             return True
         return False
@@ -216,6 +279,11 @@ class Coach(Mode):
     title = "Coach"
     keyhint = "space submit | r retry | n skip | a add drill"
 
+    KEYMAP = {
+        13: "coach.submit", 10: "coach.submit", ord(' '): "coach.submit",
+        ord('r'): "coach.retry", ord('n'): "coach.skip", ord('a'): "coach.add_drill",
+    }
+
     def __init__(self) -> None:
         self.leitner = Leitner()
         self.log = SessionLog()
@@ -252,29 +320,43 @@ class Coach(Mode):
         d = dists.get(slugify(name))
         return 0.0 if d is None else max(0.0, 1.0 - d / REJECT_DISTANCE)
 
-    def update(self, ctx: Ctx) -> None:
+    def compute(self, ctx: Ctx) -> dict:
         if self.target is None:
             self._pick(ctx)
         self.best = max(self.best * 0.97, self._score(ctx))
-
         kind, name = self.target
+        return {
+            "mode": "coach",
+            "target_kind": kind,
+            "target_name": name,
+            "score": self.best,
+            "pass": self.best >= PASS_SCORE,
+            "msg": self.msg,
+            "session_ok": self.session_ok,
+            "session_n": self.session_n,
+            "box_counts": self.leitner.box_counts(),
+        }
+
+    def update(self, ctx: Ctx) -> None:
+        state = self.compute(ctx)
         f = ctx.frame
-        hud.top_bar(f, "2 Coach", f"{self.session_ok}/{self.session_n} this session")
-        colour = hud.GREEN if self.best >= PASS_SCORE else hud.AMBER
+        hud.top_bar(f, "2 Coach", f"{state['session_ok']}/{state['session_n']} this session")
+        colour = hud.GREEN if state["pass"] else hud.AMBER
         hud.panel(f, [
-            (f"sign this:  {name}" + ("  (letter)" if kind == "letter" else "  (sign)"), hud.WHITE),
-            (f"match  [{'#' * int(self.best * 20):<20}] {self.best:.2f}", colour),
-            (self.msg, hud.GREY),
+            (f"sign this:  {state['target_name']}" +
+             ("  (letter)" if state["target_kind"] == "letter" else "  (sign)"), hud.WHITE),
+            (f"match  [{'#' * int(state['score'] * 20):<20}] {state['score']:.2f}", colour),
+            (state["msg"], hud.GREY),
         ])
-        boxes = self.leitner.box_counts()
+        boxes = state["box_counts"]
         hud.text(f, "boxes " + " ".join(f"{i}:{n}" for i, n in enumerate(boxes)),
                  (16, f.shape[0] - 24), 0.55, hud.GREY)
 
-    def on_key(self, code: int, ctx: Ctx) -> bool:
+    def on_action(self, action: str, ctx: Ctx, **kw) -> bool:
         if self.target is None:
             return False
         key = ":".join(self.target)
-        if code in (13, 10, ord(' ')):
+        if action == "coach.submit":
             ok = self.best >= PASS_SCORE
             box = self.leitner.grade(key, ok, ctx.now)
             self.session_n += 1
@@ -285,16 +367,16 @@ class Coach(Mode):
             ctx.live.reset()
             self._pick(ctx)
             return True
-        if code == ord('r'):
+        if action == "coach.retry":
             self.best = 0.0
             ctx.live.reset()
             return True
-        if code == ord('n'):
+        if action == "coach.skip":
             ctx.live.reset()
             self._pick(ctx)
             self.msg = "skipped"
             return True
-        if code == ord('a'):
+        if action == "coach.add_drill":
             ctx.request_prompt("drill", "add drill (single letter, or a sign name)")
             return True
         return False
@@ -311,6 +393,12 @@ class Control(Mode):
     title = "Control"
     keyhint = "l learn+bind | e reload commands.json | u unbind last"
 
+    KEYMAP = {
+        ord('l'): "control.learn",
+        ord('e'): "control.reload",
+        ord('u'): "control.unbind_last",
+    }
+
     def __init__(self) -> None:
         self.commands = load_commands()
         self.last = ""
@@ -318,32 +406,44 @@ class Control(Mode):
         self._pending_name = ""
         self._pending_action: dict | None = None
 
-    def update(self, ctx: Ctx) -> None:
+    def compute(self, ctx: Ctx) -> dict:
         if not ctx.paused:
             m = ctx.live.poll(ctx.bank, ctx.now)
             if m is not None and m.name in self.commands:
                 self.last = run_action(self.commands[m.name])
                 self.last_name = m.name
+        return {
+            "mode": "control",
+            "commands": [
+                {"name": k, "action_type": v.get("type"), "action_value": v.get("value")}
+                for k, v in self.commands.items()
+            ],
+            "last_fired": self.last,
+            "last_name": self.last_name,
+            "bound_count": len(self.commands),
+        }
 
+    def update(self, ctx: Ctx) -> None:
+        state = self.compute(ctx)
         f = ctx.frame
-        hud.top_bar(f, "3 Control", f"{len(self.commands)} bound")
-        lines = [(f"{k}  ->  {v.get('type')}: {v.get('value')}", hud.WHITE)
-                 for k, v in list(self.commands.items())[:6]]
+        hud.top_bar(f, "3 Control", f"{state['bound_count']} bound")
+        lines = [(f"{c['name']}  ->  {c['action_type']}: {c['action_value']}", hud.WHITE)
+                 for c in state["commands"][:6]]
         if not lines:
             lines = [("no commands yet - press 'l' to learn one", hud.GREY)]
-        if self.last:
-            lines.append((f"fired  {self.last_name}: {self.last}", hud.GREEN))
+        if state["last_fired"]:
+            lines.append((f"fired  {state['last_name']}: {state['last_fired']}", hud.GREEN))
         hud.panel(f, lines, scale=0.62, gap=32)
 
-    def on_key(self, code: int, ctx: Ctx) -> bool:
-        if code == ord('l'):
+    def on_action(self, action: str, ctx: Ctx, **kw) -> bool:
+        if action == "control.learn":
             ctx.request_prompt("ctl_name", "command sign name")
             return True
-        if code == ord('e'):
+        if action == "control.reload":
             self.commands = load_commands()
             self.last = "reloaded"
             return True
-        if code == ord('u') and self.last_name in self.commands:
+        if action == "control.unbind_last" and self.last_name in self.commands:
             self.commands.pop(self.last_name)
             save_commands(self.commands)
             self.last = f"unbound {self.last_name}"
@@ -389,18 +489,28 @@ class Pointer(Mode):
         self.pc.reset()
         self._prev = 0.0
 
-    def update(self, ctx: Ctx) -> None:
-        f = ctx.frame
+    def compute(self, ctx: Ctx) -> dict:
         if not self.pc.enabled:
-            hud.top_bar(f, "4 Pointer", "unavailable")
-            hud.panel(f, [("pip install pyautogui, then grant Accessibility", hud.RED)])
-            return
+            return {"mode": "pointer", "enabled": False, "status_lines": []}
         dt = (ctx.now - self._prev) if self._prev else None
         self._prev = ctx.now
         hand, _ = dominant_hand(ctx.pose)
         lines = self.pc.update(hand if not ctx.paused else None, ctx.now, dt)
+        return {
+            "mode": "pointer",
+            "enabled": True,
+            "status_lines": [{"text": s, "color": c} for s, c in lines],
+        }
+
+    def update(self, ctx: Ctx) -> None:
+        state = self.compute(ctx)
+        f = ctx.frame
+        if not state["enabled"]:
+            hud.top_bar(f, "4 Pointer", "unavailable")
+            hud.panel(f, [("pip install pyautogui, then grant Accessibility", hud.RED)])
+            return
         hud.top_bar(f, "4 Pointer", "hands-free mouse")
-        hud.panel(f, [(s, c) for s, c in lines], scale=0.62, gap=30)
+        hud.panel(f, [(l["text"], l["color"]) for l in state["status_lines"]], scale=0.62, gap=30)
 
 
 def all_modes() -> list[Mode]:

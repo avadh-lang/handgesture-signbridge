@@ -483,12 +483,88 @@ def test_sessionlog():
         check("sessionlog reload sees rows", SessionLog(path).summary()["letter:B"]["passes"] == 1)
 
 
+# ============================================================ 14. modes
+# Phase 2 of docs/REWORK_ROADMAP.md split each Mode.update() (decide + draw)
+# into Mode.compute() (pure-ish state, no hud/cv2 calls) + Mode.update()
+# (compute() then draw). These checks exercise compute() directly - the
+# path a non-OpenCV frontend (and backend/runtime.py's Engine) uses - plus
+# the on_key -> KEYMAP -> on_action shim that keeps the keyboard CLI and any
+# future named-action frontend using one shared action vocabulary.
+from modes import Communicator, Coach, Control, Ctx, Pointer  # noqa: E402
+from recorder import SignRecorder  # noqa: E402
+
+
+def test_modes():
+    with tempfile.TemporaryDirectory() as d:
+        bank = SignBank(d)
+        live = LiveSigner()
+        recorder = SignRecorder()
+        body = BodyRef(np.array([0.5, 0.3]), 0.4, 0.0)
+        hand = place(thumb_to(CANON, (0.0, 0.08)), (0.5, 0.4), 0.8)  # a static "B"
+        pose = Pose(right=hand, body=body)
+        ctx = Ctx(None, pose, 0.0, bank, live, recorder)
+
+        comm = Communicator()
+        comm.activate(ctx)
+        state = comm.compute(ctx)
+        check("communicator.compute returns a view-state dict",
+              {"word", "sentence_text", "suggestions", "detecting_letter"} <= set(state))
+        check("communicator detects a letter from a static handshape",
+              state["detecting_letter"] is not None, str(state["detecting_letter"]))
+
+        comm_via_action, comm_via_key = Communicator(), Communicator()
+        comm_via_action.on_action("communicator.toggle_reverse", ctx)
+        comm_via_key.on_key(ord('v'), ctx)
+        check("on_key -> KEYMAP -> on_action agrees with calling on_action directly",
+              comm_via_action.reverse and comm_via_key.reverse)
+
+        coach = Coach()
+        coach.leitner = Leitner(Path(d) / "leitner.json")      # keep test isolated -
+        coach.log = SessionLog(Path(d) / "practice_log.csv")   # don't touch real data/
+        coach.activate(ctx)
+        cs = coach.compute(ctx)
+        check("coach.compute picks a target", cs["target_name"] is not None, str(cs["target_name"]))
+        check("coach.compute score is in [0, 1]", 0.0 <= cs["score"] <= 1.0, str(cs["score"]))
+
+        control = Control()
+        control.activate(ctx)
+        handled = control.on_action("control.learn", ctx)
+        check("control.learn (named action) requests a prompt",
+              handled and ctx._prompt_request is not None)
+        ctx._prompt_request = None
+        handled2 = control.on_key(ord('l'), ctx)
+        check("control 'l' keypress requests the same prompt via KEYMAP",
+              handled2 and ctx._prompt_request is not None)
+
+        pointer = Pointer()
+        pointer.activate(ctx)
+        ps = pointer.compute(ctx)
+        check("pointer.compute reports an enabled flag", "enabled" in ps, str(ps))
+
+
+# ============================================================ 15. backend
+from backend.runtime import _pose_to_landmarks  # noqa: E402
+
+
+def test_backend_runtime():
+    # _pose_to_landmarks is the Pose -> JSON serializer backend/server.py's
+    # `landmarks` WebSocket message uses - pure function, no camera needed.
+    hand = place(thumb_to(CANON, (0.0, 0.08)), (0.5, 0.4), 0.8)
+    body = BodyRef(np.array([0.5, 0.3]), 0.4, 0.0)
+    lm = _pose_to_landmarks(Pose(right=hand, body=body))
+    check("_pose_to_landmarks serialises the present hand",
+          lm["right"] is not None and len(lm["right"]) == 21, str(lm["right"] and len(lm["right"])))
+    check("_pose_to_landmarks serialises the body reference",
+          lm["body"] is not None and "scale" in lm["body"], str(lm["body"]))
+    check("_pose_to_landmarks leaves an absent hand as null", lm["left"] is None)
+
+
 # ==================================================================== run
 def run():
     for fn in (test_gestures, test_skeleton, test_dtw, test_signbank,
                test_fingerspell, test_predict, test_speller, test_glosser,
                test_leitner, test_live, test_filters, test_pointer,
-               test_sessionlog):
+               test_sessionlog, test_modes, test_backend_runtime):
         print(f"\n{fn.__name__}:")
         try:
             fn()

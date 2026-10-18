@@ -102,6 +102,22 @@ Examples use the macOS/Linux venv path (`.venv/bin/python`); on Windows use
 | Control | `l` · `e` · `u` | learn + bind a command · reload `commands.json` · unbind last |
 | Pointer | — | drop your hand out of frame to release the cursor |
 
+## Web backend (in progress)
+
+SignBridge is being reworked into a local inference server + web UI (see
+`docs/ARCHITECTURE.md` and `docs/REWORK_ROADMAP.md`). The backend half is
+up — the camera/MediaPipe/recognition loop is now also reachable over a
+local WebSocket, independent of the `app.py` cv2 window above (which still
+works exactly as before and isn't going away):
+
+```bash
+.venv/bin/python -m backend.server          # ws://127.0.0.1:8765/ws
+```
+
+There's no web frontend yet (that's Phase 3 of the roadmap) — this serves
+the WebSocket API only for now. `backend/runtime.py`'s `Engine` class is
+what both `app.py` and this server are meant to eventually share.
+
 ## How fingerspelling works
 
 `fingerspell.py` classifies the ASL A–Z from a single hand geometrically. It's
